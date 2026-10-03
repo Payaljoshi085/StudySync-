@@ -1,0 +1,6 @@
+{
+  "name": "StudySync - AI-Powered Study Management Platform",
+  "description": "Your personalized AI study companion for smart notes, revision, flashcards, quizzes, study planner, focus timer, and academic analytics.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
