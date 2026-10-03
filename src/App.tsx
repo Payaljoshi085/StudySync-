@@ -25,11 +25,46 @@ import { FocusView } from './components/focus/FocusView';
 import { AnalyticsView } from './components/analytics/AnalyticsView';
 import { ProfileView } from './components/profile/ProfileView';
 
+function getInitialPublicView(): 'landing' | 'login' | 'register' {
+  if (typeof window === 'undefined') return 'landing';
+  const path = window.location.pathname.toLowerCase();
+  const hash = window.location.hash.toLowerCase();
+  const search = new URLSearchParams(window.location.search);
+  const authParam = search.get('auth') || search.get('mode') || search.get('view');
+
+  if (path.includes('login') || hash.includes('login') || authParam === 'login' || hash.includes('signin')) return 'login';
+  if (path.includes('register') || path.includes('signup') || hash.includes('register') || hash.includes('signup') || authParam === 'register' || authParam === 'signup') return 'register';
+  return 'landing';
+}
+
 function AppContent() {
   const { user, loading, demoLogin } = useAuth();
 
   // Public View State
-  const [publicView, setPublicView] = useState<'landing' | 'login' | 'register'>('landing');
+  const [publicView, setPublicView] = useState<'landing' | 'login' | 'register'>(getInitialPublicView);
+  const [authEmailPrefill, setAuthEmailPrefill] = useState('');
+
+  // Sync state to URL and back
+  useEffect(() => {
+    const handleUrlChange = () => {
+      setPublicView(getInitialPublicView());
+    };
+    window.addEventListener('popstate', handleUrlChange);
+    window.addEventListener('hashchange', handleUrlChange);
+    return () => {
+      window.removeEventListener('popstate', handleUrlChange);
+      window.removeEventListener('hashchange', handleUrlChange);
+    };
+  }, []);
+
+  const changePublicView = (view: 'landing' | 'login' | 'register', email?: string) => {
+    if (email !== undefined) setAuthEmailPrefill(email);
+    setPublicView(view);
+    const targetUrl = view === 'landing' ? '/' : `/${view}`;
+    if (window.location.pathname !== targetUrl) {
+      window.history.pushState(null, '', targetUrl);
+    }
+  };
 
   // Authenticated Workspace State
   const [currentView, setCurrentView] = useState<NavigationItem>('dashboard');
@@ -102,23 +137,25 @@ function AppContent() {
     if (publicView === 'login') {
       return (
         <LoginPage
-          onSwitchToRegister={() => setPublicView('register')}
-          onBackToLanding={() => setPublicView('landing')}
+          initialEmail={authEmailPrefill}
+          onSwitchToRegister={(email) => changePublicView('register', email)}
+          onBackToLanding={() => changePublicView('landing')}
         />
       );
     }
     if (publicView === 'register') {
       return (
         <RegisterPage
-          onSwitchToLogin={() => setPublicView('login')}
-          onBackToLanding={() => setPublicView('landing')}
+          initialEmail={authEmailPrefill}
+          onSwitchToLogin={(email) => changePublicView('login', email)}
+          onBackToLanding={() => changePublicView('landing')}
         />
       );
     }
     return (
       <LandingPage
-        onOpenLogin={() => setPublicView('login')}
-        onOpenRegister={() => setPublicView('register')}
+        onOpenLogin={() => changePublicView('login')}
+        onOpenRegister={() => changePublicView('register')}
         onTryDemo={async () => {
           try {
             await demoLogin();

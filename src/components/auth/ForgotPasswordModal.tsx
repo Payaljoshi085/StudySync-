@@ -1,26 +1,36 @@
 import React, { useState } from 'react';
 import { X, Mail, KeyRound, CheckCircle2, AlertCircle } from 'lucide-react';
 import { api } from '../../lib/api';
+import { useAuth } from '../../context/AuthContext';
 
 interface ForgotPasswordModalProps {
   isOpen: boolean;
+  defaultEmail?: string;
   onClose: () => void;
   onSuccess: () => void;
 }
 
 export const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({
   isOpen,
+  defaultEmail = '',
   onClose,
   onSuccess,
 }) => {
+  const { setSession } = useAuth();
   const [step, setStep] = useState<'request' | 'reset'>('request');
-  const [email, setEmail] = useState('');
+  const [email, setEmail] = useState(defaultEmail);
   const [resetToken, setResetToken] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
+
+  React.useEffect(() => {
+    if (defaultEmail) {
+      setEmail(defaultEmail);
+    }
+  }, [defaultEmail, isOpen]);
 
   if (!isOpen) return null;
 
@@ -38,7 +48,7 @@ export const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({
       if (res.resetToken) {
         setResetToken(res.resetToken);
         setStep('reset');
-        setSuccessMsg('Reset token generated. Set your new password below:');
+        setSuccessMsg('Reset code generated. Enter your new password below:');
       } else {
         setSuccessMsg(res.message);
       }
@@ -64,16 +74,19 @@ export const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({
     setLoading(true);
 
     try {
-      await api.resetPassword({
+      const res = await api.resetPassword({
         token: resetToken,
         newPassword,
         confirmPassword,
       });
-      setSuccessMsg('Password reset successfully! You can now log in.');
+      setSuccessMsg('Password reset successfully! Logging you into your workspace...');
       setTimeout(() => {
+        if (res.token && res.user) {
+          setSession(res.token, res.user);
+        }
         onSuccess();
         onClose();
-      }, 1500);
+      }, 1000);
     } catch (err: any) {
       setErrorMsg(err.message || 'Failed to reset password.');
     } finally {

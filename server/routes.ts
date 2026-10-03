@@ -57,6 +57,9 @@ router.post('/auth/register', (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Name, email, and password are required.' });
     }
 
+    const cleanEmail = email.trim().toLowerCase();
+    const cleanName = name.trim();
+
     if (password.length < 6) {
       return res.status(400).json({ error: 'Password must be at least 6 characters long.' });
     }
@@ -66,23 +69,27 @@ router.post('/auth/register', (req: Request, res: Response) => {
     }
 
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email)) {
+    if (!emailRegex.test(cleanEmail)) {
       return res.status(400).json({ error: 'Please enter a valid email address.' });
     }
 
-    const existing = db.findUserByEmail(email);
+    const existing = db.findUserByEmail(cleanEmail);
     if (existing) {
-      return res.status(409).json({ error: 'An account with this email address already exists.' });
+      return res.status(409).json({
+        error: 'An account with this email address already exists. Please sign in instead.',
+        alreadyExists: true,
+        email: cleanEmail,
+      });
     }
 
     const salt = bcrypt.genSaltSync(10);
     const passwordHash = bcrypt.hashSync(password, salt);
 
     const user = db.createUser({
-      name: name.trim(),
-      email: email.trim().toLowerCase(),
+      name: cleanName,
+      email: cleanEmail,
       passwordHash,
-      avatar: avatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(name.trim())}`,
+      avatar: avatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(cleanName)}`,
       educationLevel: educationLevel || 'College / University',
       course: course || 'General Studies',
       semester: semester || 'Year 1',
@@ -119,14 +126,23 @@ router.post('/auth/login', (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Email and password are required.' });
     }
 
-    const user = db.findUserByEmail(email);
+    const cleanEmail = email.trim().toLowerCase();
+    const user = db.findUserByEmail(cleanEmail);
     if (!user) {
-      return res.status(401).json({ error: 'Invalid email or password.' });
+      return res.status(401).json({
+        error: 'No account found with this email. Please check your spelling or sign up below.',
+        notFound: true,
+        email: cleanEmail,
+      });
     }
 
     const match = bcrypt.compareSync(password, user.passwordHash);
     if (!match) {
-      return res.status(401).json({ error: 'Invalid email or password.' });
+      return res.status(401).json({
+        error: 'Incorrect password. Please verify your password or use "Forgot password?" to reset it.',
+        incorrectPassword: true,
+        email: cleanEmail,
+      });
     }
 
     const token = db.createSession(user.id);
@@ -143,9 +159,31 @@ router.post('/auth/login', (req: Request, res: Response) => {
 
 router.post('/auth/demo-login', (req: Request, res: Response) => {
   try {
-    const demoUser = db.findUserByEmail('demo@studysync.edu');
+    let demoUser = db.findUserByEmail('demo@studysync.edu');
     if (!demoUser) {
-      return res.status(404).json({ error: 'Demo account not initialized.' });
+      // Re-seed demo user if somehow missing
+      const salt = bcrypt.genSaltSync(10);
+      const passwordHash = bcrypt.hashSync('StudySync@2026', salt);
+      demoUser = db.createUser({
+        name: 'Alex Vance',
+        email: 'demo@studysync.edu',
+        passwordHash,
+        avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=256&q=80',
+        educationLevel: 'Undergraduate',
+        course: 'Computer Science & AI',
+        semester: '4th Semester (Year 2)',
+        theme: 'dark',
+        studyGoals: {
+          dailyMinutes: 180,
+          weeklySessions: 12,
+          primaryFocus: 'Data Structures & Distributed Systems',
+        },
+        notificationPreferences: {
+          deadlines: true,
+          streakReminders: true,
+          goalAlerts: true,
+        },
+      });
     }
 
     const token = db.createSession(demoUser.id);
@@ -179,19 +217,20 @@ router.post('/auth/forgot-password', (req: Request, res: Response) => {
     return res.status(400).json({ error: 'Email is required.' });
   }
 
-  const user = db.findUserByEmail(email);
+  const cleanEmail = email.trim().toLowerCase();
+  const user = db.findUserByEmail(cleanEmail);
   if (!user) {
-    // Return friendly generic message for security
-    return res.json({
-      message: 'If an account exists with that email, a password reset link has been prepared.',
-      resetToken: null,
+    return res.status(404).json({
+      error: 'No account registered with this email address. Please sign up to create your account.',
+      notFound: true,
     });
   }
 
   const resetToken = db.createPasswordReset(user.id);
   return res.json({
-    message: 'Password reset link generated. You may now reset your password.',
+    message: 'Password reset link generated. You may now enter your new password.',
     resetToken,
+    userEmail: cleanEmail,
   });
 });
 
@@ -220,7 +259,15 @@ router.post('/auth/reset-password', (req: Request, res: Response) => {
   db.updateUser(userId, { passwordHash });
   db.consumePasswordReset(token);
 
-  return res.json({ message: 'Password has been reset successfully. You can now login.' });
+  // Automatically log user in upon resetting their password!
+  const sessionToken = db.createSession(userId);
+  const user = db.findUserById(userId);
+
+  return res.json({
+    message: 'Password has been reset successfully!',
+    token: sessionToken,
+    user: user ? sanitizeUser(user) : null,
+  });
 });
 
 // ----------------------------------------------------
