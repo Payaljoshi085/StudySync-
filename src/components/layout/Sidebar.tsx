@@ -167,7 +167,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
         {/* Bottom User Area */}
         <div className="p-3 border-t border-zinc-200 dark:border-zinc-800/80 shrink-0">
           <div
-            className={`flex items-center gap-3 p-2 rounded-xl bg-zinc-50 dark:bg-zinc-900/60 border border-zinc-200 dark:border-zinc-800/60 ${
+            onClick={() => onNavigate('profile')}
+            className={`flex items-center gap-3 p-2 rounded-xl bg-zinc-50 dark:bg-zinc-900/60 border border-zinc-200 dark:border-zinc-800/60 cursor-pointer hover:border-indigo-500/40 transition-colors ${
               collapsed ? 'justify-center p-2' : ''
             }`}
           >
@@ -185,13 +186,28 @@ export const Sidebar: React.FC<SidebarProps> = ({
               </div>
             )}
             {!collapsed && (
-              <button
-                onClick={() => logout()}
-                className="p-1.5 text-zinc-400 hover:text-rose-500 rounded-lg hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-colors"
-                title="Log out"
-              >
-                <LogOut className="w-4 h-4" />
-              </button>
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onNavigate('profile');
+                  }}
+                  className="p-1.5 text-zinc-400 hover:text-indigo-500 rounded-lg hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-colors"
+                  title="Profile & Settings"
+                >
+                  <User className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={async (e) => {
+                    e.stopPropagation();
+                    await logout();
+                  }}
+                  className="p-1.5 text-zinc-400 hover:text-rose-500 rounded-lg hover:bg-rose-500/10 transition-colors"
+                  title="Sign Out"
+                >
+                  <LogOut className="w-4 h-4" />
+                </button>
+              </div>
             )}
           </div>
         </div>

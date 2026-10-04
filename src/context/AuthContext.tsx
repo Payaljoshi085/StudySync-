@@ -1,112 +1,145 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import {
+  onAuthStateChanged,
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  sendPasswordResetEmail,
+  signInWithPopup,
+  signOut,
+  updateProfile as updateFirebaseProfile,
+  User as FirebaseUser,
+} from 'firebase/auth';
+import { auth, googleProvider, getFirebaseUserProfile, saveFirebaseUserProfile, bootstrapNewUserSpace } from '../lib/firebase';
 import { User } from '../types';
-import { api, getStoredToken, setStoredToken } from '../lib/api';
 
 interface AuthContextType {
   user: User | null;
-  token: string | null;
+  firebaseUser: FirebaseUser | null;
   loading: boolean;
-  login: (email: string, password: string) => Promise<void>;
-  demoLogin: () => Promise<void>;
-  register: (data: any) => Promise<void>;
+  loginWithEmail: (email: string, pass: string) => Promise<void>;
+  signupWithEmail: (email: string, pass: string, name: string) => Promise<void>;
+  loginWithGoogle: () => Promise<void>;
+  resetPassword: (email: string) => Promise<void>;
   logout: () => Promise<void>;
-  refreshUser: () => Promise<void>;
   updateUser: (updates: Partial<User>) => Promise<void>;
-  setSession: (token: string, user: User) => void;
+  refreshUser: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
-  const [token, setToken] = useState<string | null>(getStoredToken());
+  const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const initAuth = async () => {
-    const currentToken = getStoredToken();
-    if (!currentToken) {
-      setLoading(false);
-      return;
-    }
-
+  const syncUserProfile = async (fbUser: FirebaseUser) => {
     try {
-      const res = await api.getMe();
-      setUser(res.user);
+      let profile = await getFirebaseUserProfile(fbUser.uid);
+      if (!profile) {
+        // First-time user bootstrap
+        await bootstrapNewUserSpace(fbUser.uid, fbUser.displayName || 'Student', fbUser.email || '');
+        profile = await getFirebaseUserProfile(fbUser.uid);
+      }
+      if (profile) {
+        setUser(profile);
+      } else {
+        // Fallback default
+        setUser({
+          id: fbUser.uid,
+          name: fbUser.displayName || 'Student',
+          email: fbUser.email || '',
+          avatar: fbUser.photoURL || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=256&q=80',
+          educationLevel: 'Undergraduate',
+          course: 'Computer Science & AI',
+          semester: 'Semester 1',
+          theme: 'dark',
+          studyGoals: {
+            dailyMinutes: 120,
+            weeklySessions: 8,
+            primaryFocus: 'Exam Preparation & Mastery',
+          },
+          notificationPreferences: {
+            deadlines: true,
+            streakReminders: true,
+            goalAlerts: true,
+          },
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        });
+      }
     } catch (err) {
-      console.warn('Session verification failed, logging out:', err);
-      setStoredToken(null);
-      setToken(null);
-      setUser(null);
-    } finally {
-      setLoading(false);
+      console.error('Error syncing user profile:', err);
     }
   };
 
   useEffect(() => {
-    initAuth();
+    const unsubscribe = onAuthStateChanged(auth, async (fbUser) => {
+      setFirebaseUser(fbUser);
+      if (fbUser) {
+        await syncUserProfile(fbUser);
+      } else {
+        setUser(null);
+      }
+      setLoading(false);
+    });
+
+    return () => unsubscribe();
   }, []);
 
-  const login = async (email: string, password: string) => {
-    const res = await api.login({ email, password });
-    setStoredToken(res.token);
-    setToken(res.token);
-    setUser(res.user);
+  const loginWithEmail = async (email: string, pass: string) => {
+    const cred = await signInWithEmailAndPassword(auth, email.trim(), pass);
+    await syncUserProfile(cred.user);
   };
 
-  const demoLogin = async () => {
-    const res = await api.demoLogin();
-    setStoredToken(res.token);
-    setToken(res.token);
-    setUser(res.user);
+  const signupWithEmail = async (email: string, pass: string, name: string) => {
+    const cred = await createUserWithEmailAndPassword(auth, email.trim(), pass);
+    if (name.trim()) {
+      await updateFirebaseProfile(cred.user, { displayName: name.trim() });
+    }
+    await bootstrapNewUserSpace(cred.user.uid, name.trim(), email.trim());
+    await syncUserProfile(cred.user);
   };
 
-  const register = async (data: any) => {
-    const res = await api.register(data);
-    setStoredToken(res.token);
-    setToken(res.token);
-    setUser(res.user);
+  const loginWithGoogle = async () => {
+    const cred = await signInWithPopup(auth, googleProvider);
+    await syncUserProfile(cred.user);
   };
 
-  const setSession = (newToken: string, newUser: User) => {
-    setStoredToken(newToken);
-    setToken(newToken);
-    setUser(newUser);
+  const resetPassword = async (email: string) => {
+    await sendPasswordResetEmail(auth, email.trim());
   };
 
   const logout = async () => {
-    try {
-      await api.logout();
-    } catch {}
-    setStoredToken(null);
-    setToken(null);
+    await signOut(auth);
     setUser(null);
-  };
-
-  const refreshUser = async () => {
-    try {
-      const res = await api.getMe();
-      setUser(res.user);
-    } catch {}
+    setFirebaseUser(null);
   };
 
   const updateUser = async (updates: Partial<User>) => {
-    const res = await api.updateProfile(updates);
-    setUser(res.user);
+    if (!firebaseUser) return;
+    await saveFirebaseUserProfile(firebaseUser.uid, updates);
+    setUser((prev) => (prev ? { ...prev, ...updates } : null));
+  };
+
+  const refreshUser = async () => {
+    if (firebaseUser) {
+      await syncUserProfile(firebaseUser);
+    }
   };
 
   return (
     <AuthContext.Provider
       value={{
         user,
-        token,
+        firebaseUser,
         loading,
-        login,
-        demoLogin,
-        register,
+        loginWithEmail,
+        signupWithEmail,
+        loginWithGoogle,
+        resetPassword,
         logout,
-        refreshUser,
         updateUser,
-        setSession,
+        refreshUser,
       }}
     >
       {children}
@@ -114,10 +147,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   );
 };
 
-export function useAuth() {
+export const useAuth = () => {
   const context = useContext(AuthContext);
   if (!context) {
     throw new Error('useAuth must be used within an AuthProvider');
   }
   return context;
-}
+};

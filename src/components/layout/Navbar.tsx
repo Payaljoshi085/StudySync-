@@ -6,10 +6,10 @@ import {
   Bell,
   Sun,
   Moon,
-  LogOut,
   User as UserIcon,
   Timer,
   ChevronDown,
+  LogOut,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
@@ -173,14 +173,14 @@ export const Navbar: React.FC<NavbarProps> = ({
 
               <div className="border-t border-zinc-100 dark:border-zinc-800 pt-1">
                 <button
-                  onClick={() => {
+                  onClick={async () => {
                     setIsProfileMenuOpen(false);
-                    logout();
+                    await logout();
                   }}
                   className="w-full px-4 py-2 text-left text-xs font-semibold text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/30 flex items-center gap-2.5 transition-colors"
                 >
                   <LogOut className="w-3.5 h-3.5" />
-                  <span>Log Out</span>
+                  <span>Sign Out</span>
                 </button>
               </div>
             </div>

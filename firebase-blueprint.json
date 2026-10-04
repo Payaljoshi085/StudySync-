@@ -1,0 +1,152 @@
+{
+  "entities": {
+    "userProfile": {
+      "title": "User Profile",
+      "description": "Personal account profile, preferences and study targets for an authenticated student.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "maxLength": 100 },
+        "email": { "type": "string", "maxLength": 150 },
+        "avatar": { "type": "string", "maxLength": 500 },
+        "educationLevel": { "type": "string", "maxLength": 100 },
+        "course": { "type": "string", "maxLength": 150 },
+        "semester": { "type": "string", "maxLength": 100 },
+        "theme": { "type": "string", "enum": ["dark", "light"] },
+        "studyGoals": { "type": "object" },
+        "notificationPreferences": { "type": "object" },
+        "createdAt": { "type": "string", "maxLength": 50 },
+        "updatedAt": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["email", "name", "createdAt"]
+    },
+    "note": {
+      "title": "Study Note",
+      "description": "Rich-text student note belonging to an individual user.",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string", "maxLength": 200 },
+        "content": { "type": "string", "maxLength": 200000 },
+        "subject": { "type": "string", "maxLength": 100 },
+        "subjectId": { "type": "string", "maxLength": 100 },
+        "tags": { "type": "array" },
+        "color": { "type": "string", "maxLength": 30 },
+        "isPinned": { "type": "boolean" },
+        "isFavorite": { "type": "boolean" },
+        "isArchived": { "type": "boolean" },
+        "userId": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "maxLength": 50 },
+        "updatedAt": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["title", "userId", "createdAt"]
+    },
+    "aiNote": {
+      "title": "AI Generated Note",
+      "description": "AI-generated synthesis or study notes saved under the student's UID.",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string", "maxLength": 200 },
+        "content": { "type": "string", "maxLength": 200000 },
+        "topic": { "type": "string", "maxLength": 200 },
+        "sourceText": { "type": "string", "maxLength": 50000 },
+        "mode": { "type": "string", "maxLength": 50 },
+        "subject": { "type": "string", "maxLength": 100 },
+        "subjectId": { "type": "string", "maxLength": 100 },
+        "tags": { "type": "array" },
+        "userId": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "maxLength": 50 },
+        "updatedAt": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["title", "userId", "createdAt"]
+    },
+    "subject": {
+      "title": "Subject",
+      "description": "Academic course or subject tracked by the user.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "maxLength": 100 },
+        "color": { "type": "string", "maxLength": 30 },
+        "icon": { "type": "string", "maxLength": 50 },
+        "targetHoursPerWeek": { "type": "number" },
+        "examDate": { "type": "string", "maxLength": 50 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["name", "userId"]
+    },
+    "task": {
+      "title": "Study Task",
+      "description": "Student homework, revision task, or assignment item.",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string", "maxLength": 200 },
+        "description": { "type": "string", "maxLength": 5000 },
+        "subjectId": { "type": "string", "maxLength": 100 },
+        "priority": { "type": "string", "enum": ["low", "medium", "high"] },
+        "status": { "type": "string", "enum": ["todo", "in_progress", "completed"] },
+        "dueDate": { "type": "string", "maxLength": 50 },
+        "estimatedMinutes": { "type": "number" },
+        "completedAt": { "type": "string", "maxLength": 50 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["title", "userId", "status"]
+    },
+    "flashcardDeck": {
+      "title": "Flashcard Deck",
+      "description": "Collection of review flashcards belonging to the user.",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string", "maxLength": 150 },
+        "description": { "type": "string", "maxLength": 500 },
+        "subjectId": { "type": "string", "maxLength": 100 },
+        "cards": { "type": "array" },
+        "userId": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["title", "userId"]
+    },
+    "quiz": {
+      "title": "Quiz",
+      "description": "Interactive study quiz created or generated for the user.",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string", "maxLength": 150 },
+        "subjectId": { "type": "string", "maxLength": 100 },
+        "questions": { "type": "array" },
+        "userId": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["title", "userId"]
+    }
+  },
+  "firestore": {
+    "/users/{uid}": {
+      "schema": "userProfile",
+      "description": "Root user account document containing profile and settings."
+    },
+    "/users/{uid}/notes/{noteId}": {
+      "schema": "note",
+      "description": "Personal user notes subcollection isolated by Firebase UID."
+    },
+    "/users/{uid}/aiNotes/{noteId}": {
+      "schema": "aiNote",
+      "description": "Personal saved AI notes subcollection isolated by Firebase UID."
+    },
+    "/users/{uid}/subjects/{subjectId}": {
+      "schema": "subject",
+      "description": "Personal subjects subcollection isolated by Firebase UID."
+    },
+    "/users/{uid}/tasks/{taskId}": {
+      "schema": "task",
+      "description": "Personal study tasks subcollection isolated by Firebase UID."
+    },
+    "/users/{uid}/flashcards/{deckId}": {
+      "schema": "flashcardDeck",
+      "description": "Personal flashcards subcollection isolated by Firebase UID."
+    },
+    "/users/{uid}/quizzes/{quizId}": {
+      "schema": "quiz",
+      "description": "Personal quizzes subcollection isolated by Firebase UID."
+    }
+  }
+}

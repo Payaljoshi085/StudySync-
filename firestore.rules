@@ -1,0 +1,88 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Default deny all access
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128;
+    }
+
+    // Root user document: /users/{uid}
+    match /users/{uid} {
+      allow get: if isOwner(uid);
+      allow create: if isOwner(uid) && isValidId(uid);
+      allow update: if isOwner(uid);
+      allow delete: if isOwner(uid);
+
+      // Subcollections under /users/{uid}/...
+      // Personal Notes
+      match /notes/{noteId} {
+        allow get, list: if isOwner(uid);
+        allow create: if isOwner(uid) && isValidId(noteId)
+          && (!('userId' in request.resource.data) || request.resource.data.userId == uid);
+        allow update: if isOwner(uid)
+          && (!('userId' in request.resource.data) || request.resource.data.userId == uid);
+        allow delete: if isOwner(uid);
+      }
+
+      // AI Generated Notes
+      match /aiNotes/{noteId} {
+        allow get, list: if isOwner(uid);
+        allow create: if isOwner(uid) && isValidId(noteId)
+          && (!('userId' in request.resource.data) || request.resource.data.userId == uid);
+        allow update: if isOwner(uid)
+          && (!('userId' in request.resource.data) || request.resource.data.userId == uid);
+        allow delete: if isOwner(uid);
+      }
+
+      // Subjects
+      match /subjects/{subjectId} {
+        allow get, list: if isOwner(uid);
+        allow create: if isOwner(uid) && isValidId(subjectId)
+          && (!('userId' in request.resource.data) || request.resource.data.userId == uid);
+        allow update: if isOwner(uid);
+        allow delete: if isOwner(uid);
+      }
+
+      // Tasks
+      match /tasks/{taskId} {
+        allow get, list: if isOwner(uid);
+        allow create: if isOwner(uid) && isValidId(taskId)
+          && (!('userId' in request.resource.data) || request.resource.data.userId == uid);
+        allow update: if isOwner(uid);
+        allow delete: if isOwner(uid);
+      }
+
+      // Flashcards
+      match /flashcards/{deckId} {
+        allow get, list: if isOwner(uid);
+        allow create: if isOwner(uid) && isValidId(deckId)
+          && (!('userId' in request.resource.data) || request.resource.data.userId == uid);
+        allow update: if isOwner(uid);
+        allow delete: if isOwner(uid);
+      }
+
+      // Quizzes
+      match /quizzes/{quizId} {
+        allow get, list: if isOwner(uid);
+        allow create: if isOwner(uid) && isValidId(quizId)
+          && (!('userId' in request.resource.data) || request.resource.data.userId == uid);
+        allow update: if isOwner(uid);
+        allow delete: if isOwner(uid);
+      }
+    }
+  }
+}

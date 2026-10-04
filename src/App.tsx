@@ -8,11 +8,6 @@ import { Sidebar, NavigationItem } from './components/layout/Sidebar';
 import { Navbar } from './components/layout/Navbar';
 import { GlobalSearchModal } from './components/layout/GlobalSearchModal';
 
-// Auth & Public
-import { LandingPage } from './components/landing/LandingPage';
-import { LoginPage } from './components/auth/LoginPage';
-import { RegisterPage } from './components/auth/RegisterPage';
-
 // Views
 import { DashboardView } from './components/dashboard/DashboardView';
 import { NotesView } from './components/notes/NotesView';
@@ -24,47 +19,10 @@ import { PlannerView } from './components/planner/PlannerView';
 import { FocusView } from './components/focus/FocusView';
 import { AnalyticsView } from './components/analytics/AnalyticsView';
 import { ProfileView } from './components/profile/ProfileView';
-
-function getInitialPublicView(): 'landing' | 'login' | 'register' {
-  if (typeof window === 'undefined') return 'landing';
-  const path = window.location.pathname.toLowerCase();
-  const hash = window.location.hash.toLowerCase();
-  const search = new URLSearchParams(window.location.search);
-  const authParam = search.get('auth') || search.get('mode') || search.get('view');
-
-  if (path.includes('login') || hash.includes('login') || authParam === 'login' || hash.includes('signin')) return 'login';
-  if (path.includes('register') || path.includes('signup') || hash.includes('register') || hash.includes('signup') || authParam === 'register' || authParam === 'signup') return 'register';
-  return 'landing';
-}
+import { AuthView } from './components/auth/AuthView';
 
 function AppContent() {
-  const { user, loading, demoLogin } = useAuth();
-
-  // Public View State
-  const [publicView, setPublicView] = useState<'landing' | 'login' | 'register'>(getInitialPublicView);
-  const [authEmailPrefill, setAuthEmailPrefill] = useState('');
-
-  // Sync state to URL and back
-  useEffect(() => {
-    const handleUrlChange = () => {
-      setPublicView(getInitialPublicView());
-    };
-    window.addEventListener('popstate', handleUrlChange);
-    window.addEventListener('hashchange', handleUrlChange);
-    return () => {
-      window.removeEventListener('popstate', handleUrlChange);
-      window.removeEventListener('hashchange', handleUrlChange);
-    };
-  }, []);
-
-  const changePublicView = (view: 'landing' | 'login' | 'register', email?: string) => {
-    if (email !== undefined) setAuthEmailPrefill(email);
-    setPublicView(view);
-    const targetUrl = view === 'landing' ? '/' : `/${view}`;
-    if (window.location.pathname !== targetUrl) {
-      window.history.pushState(null, '', targetUrl);
-    }
-  };
+  const { user, loading } = useAuth();
 
   // Authenticated Workspace State
   const [currentView, setCurrentView] = useState<NavigationItem>('dashboard');
@@ -132,42 +90,11 @@ function AppContent() {
     );
   }
 
-  // Not Logged In: Show Public Landing, Login, or Register
+  // Redirect unauthenticated users to Login / Signup
   if (!user) {
-    if (publicView === 'login') {
-      return (
-        <LoginPage
-          initialEmail={authEmailPrefill}
-          onSwitchToRegister={(email) => changePublicView('register', email)}
-          onBackToLanding={() => changePublicView('landing')}
-        />
-      );
-    }
-    if (publicView === 'register') {
-      return (
-        <RegisterPage
-          initialEmail={authEmailPrefill}
-          onSwitchToLogin={(email) => changePublicView('login', email)}
-          onBackToLanding={() => changePublicView('landing')}
-        />
-      );
-    }
-    return (
-      <LandingPage
-        onOpenLogin={() => changePublicView('login')}
-        onOpenRegister={() => changePublicView('register')}
-        onTryDemo={async () => {
-          try {
-            await demoLogin();
-          } catch (err) {
-            console.error('Demo login error:', err);
-          }
-        }}
-      />
-    );
+    return <AuthView />;
   }
 
-  // Logged In: Authenticated Workspace
   return (
     <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 flex flex-col font-sans transition-colors">
       {/* Sidebar */}

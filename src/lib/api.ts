@@ -64,7 +64,7 @@ export const api = {
   login: (body: any) => request<{ token: string; user: User; message: string }>('/auth/login', { method: 'POST', body: JSON.stringify(body) }),
   demoLogin: () => request<{ token: string; user: User; message: string }>('/auth/demo-login', { method: 'POST' }),
   logout: () => request<{ message: string }>('/auth/logout', { method: 'POST' }),
-  getMe: () => request<{ user: User }>('/auth/me'),
+  getMe: () => request<{ user: User; token?: string }>('/auth/me'),
   forgotPassword: (email: string) => request<{ message: string; resetToken?: string; userEmail?: string }>('/auth/forgot-password', { method: 'POST', body: JSON.stringify({ email }) }),
   resetPassword: (body: any) => request<{ message: string; token?: string; user?: User }>('/auth/reset-password', { method: 'POST', body: JSON.stringify(body) }),
 

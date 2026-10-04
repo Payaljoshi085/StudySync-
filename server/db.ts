@@ -556,6 +556,36 @@ function dfs(node, visited) {
   }
 
   // --- User & Auth ---
+  public getPrimaryUser(): User {
+    let user = this.data.users.find(u => u.email.toLowerCase() === 'payal.26ds6014@jietjodhpur.ac.in');
+    if (user) return user;
+    if (this.data.users.length > 0) return this.data.users[0];
+
+    const salt = bcrypt.genSaltSync(10);
+    const passwordHash = bcrypt.hashSync('StudySync@2026', salt);
+    user = this.createUser({
+      name: 'Payal Joshi',
+      email: 'payal.26ds6014@jietjodhpur.ac.in',
+      passwordHash,
+      avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=256&q=80',
+      educationLevel: 'Undergraduate / College',
+      course: 'Computer Science & Engineering',
+      semester: 'Year 2 (Semester 4)',
+      theme: 'dark',
+      studyGoals: {
+        dailyMinutes: 180,
+        weeklySessions: 12,
+        primaryFocus: 'Computer Science & Engineering',
+      },
+      notificationPreferences: {
+        deadlines: true,
+        streakReminders: true,
+        goalAlerts: true,
+      },
+    });
+    return user;
+  }
+
   public findUserByEmail(email: string): User | undefined {
     return this.data.users.find(u => u.email.toLowerCase() === email.toLowerCase());
   }

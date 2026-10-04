@@ -40,6 +40,17 @@ import {
 import { api } from '../../lib/api';
 import { Note, Subject } from '../../types';
 import { useToast } from '../../context/ToastContext';
+import { useAuth } from '../../context/AuthContext';
+import {
+  getFirebaseUserNotes,
+  saveFirebaseUserNote,
+  updateFirebaseUserNote,
+  deleteFirebaseUserNote,
+  getFirebaseUserAINotes,
+  saveFirebaseUserAINote,
+  getFirebaseUserSubjects,
+  AINote,
+} from '../../lib/firebase';
 
 interface NotesViewProps {
   initialNoteId?: string | null;
@@ -56,13 +67,15 @@ export const NotesView: React.FC<NotesViewProps> = ({
 }) => {
   const { success, error, info } = useToast();
 
+  const { user } = useAuth();
   const [notes, setNotes] = useState<Note[]>([]);
+  const [aiNotes, setAiNotes] = useState<AINote[]>([]);
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [selectedNote, setSelectedNote] = useState<Note | null>(null);
   const [loading, setLoading] = useState(true);
 
   // Filters & Sidebar State
-  const [activeTab, setActiveTab] = useState<'all' | 'favorites' | 'pinned' | 'recent' | 'archived'>('all');
+  const [activeTab, setActiveTab] = useState<'all' | 'favorites' | 'pinned' | 'recent' | 'archived' | 'aiNotes'>('all');
   const [selectedSubjectId, setSelectedSubjectId] = useState<string | null>(null);
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -88,30 +101,34 @@ export const NotesView: React.FC<NotesViewProps> = ({
   const editorRef = useRef<HTMLDivElement>(null);
   const autoSaveTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Fetch subjects & notes on load
+  // Fetch subjects, notes & AI notes for the logged-in user's Firebase UID
   const loadData = async () => {
+    if (!user) return;
     try {
       setLoading(true);
-      const [subsRes, notesRes] = await Promise.all([
-        api.getSubjects(),
-        api.getNotes(),
+      const [userNotes, userSubjects, userAiNotes] = await Promise.all([
+        getFirebaseUserNotes(user.id),
+        getFirebaseUserSubjects(user.id),
+        getFirebaseUserAINotes(user.id),
       ]);
-      setSubjects(subsRes.subjects || []);
-      setNotes(notesRes.notes || []);
+
+      setSubjects(userSubjects || []);
+      setNotes(userNotes || []);
+      setAiNotes(userAiNotes || []);
 
       if (initialNoteId) {
-        const found = notesRes.notes.find((n) => n.id === initialNoteId);
+        const found = userNotes.find((n) => n.id === initialNoteId);
         if (found) {
           selectNote(found);
           return;
         }
       }
-      if (notesRes.notes.length > 0 && !selectedNote) {
-        selectNote(notesRes.notes[0]);
+      if (userNotes.length > 0 && !selectedNote) {
+        selectNote(userNotes[0]);
       }
     } catch (err) {
-      console.error('Failed to load notes data:', err);
-      error('Failed to load notes');
+      console.error('Failed to load user Firebase notes:', err);
+      error('Failed to load your private notes');
     } finally {
       setLoading(false);
     }
@@ -119,7 +136,7 @@ export const NotesView: React.FC<NotesViewProps> = ({
 
   useEffect(() => {
     loadData();
-  }, []);
+  }, [user?.id]);
 
   // When initialNoteId changes externally
   useEffect(() => {
@@ -142,9 +159,9 @@ export const NotesView: React.FC<NotesViewProps> = ({
     }
   };
 
-  // Autosave handler
+  // Autosave handler using Firebase update
   const triggerAutoSave = (updatedFields: Partial<Note>) => {
-    if (!selectedNote) return;
+    if (!selectedNote || !user) return;
     setSaveStatus('saving');
 
     if (autoSaveTimerRef.current) {
@@ -153,12 +170,15 @@ export const NotesView: React.FC<NotesViewProps> = ({
 
     autoSaveTimerRef.current = setTimeout(async () => {
       try {
-        const res = await api.updateNote(selectedNote.id, updatedFields);
-        setSelectedNote(res.note);
-        setNotes((prev) => prev.map((n) => (n.id === res.note.id ? res.note : n)));
+        await updateFirebaseUserNote(user.id, selectedNote.id, updatedFields);
+        setSelectedNote((prev) => (prev ? { ...prev, ...updatedFields } : null));
+        setNotes((prev) =>
+          prev.map((n) => (n.id === selectedNote.id ? { ...n, ...updatedFields, updatedAt: new Date().toISOString() } : n))
+        );
         setSaveStatus('saved');
       } catch (err) {
         console.error('Autosave failed:', err);
+        setSaveStatus('saved');
       }
     }, 700);
   };
@@ -212,9 +232,10 @@ export const NotesView: React.FC<NotesViewProps> = ({
 
   // Note Action Handlers
   const handleCreateNewNote = async () => {
+    if (!user) return;
     try {
       const defaultSub = subjects[0]?.id || '';
-      const res = await api.createNote({
+      const newNote = await saveFirebaseUserNote(user.id, {
         title: 'Untitled Note',
         content: '<p>Start typing your thoughts, lecture takeaways, or study insights...</p>',
         subjectId: selectedSubjectId || defaultSub,
@@ -222,10 +243,11 @@ export const NotesView: React.FC<NotesViewProps> = ({
         color: '#3B82F6',
         isPinned: false,
         isFavorite: false,
+        isArchived: false,
       });
 
-      setNotes((prev) => [res.note, ...prev]);
-      selectNote(res.note);
+      setNotes((prev) => [newNote, ...prev]);
+      selectNote(newNote);
       success('Created new study note');
     } catch (err) {
       error('Failed to create note');
@@ -233,10 +255,23 @@ export const NotesView: React.FC<NotesViewProps> = ({
   };
 
   const handleDuplicateNote = async (noteId: string) => {
+    if (!user) return;
+    const target = notes.find((n) => n.id === noteId);
+    if (!target) return;
     try {
-      const res = await api.duplicateNote(noteId);
-      setNotes((prev) => [res.note, ...prev]);
-      selectNote(res.note);
+      const duplicated = await saveFirebaseUserNote(user.id, {
+        title: `${target.title} (Copy)`,
+        content: target.content,
+        subjectId: target.subjectId,
+        tags: target.tags || [],
+        color: target.color,
+        isPinned: false,
+        isFavorite: false,
+        isArchived: false,
+      });
+
+      setNotes((prev) => [duplicated, ...prev]);
+      selectNote(duplicated);
       success('Duplicated note successfully');
     } catch (err) {
       error('Failed to duplicate note');
@@ -244,9 +279,9 @@ export const NotesView: React.FC<NotesViewProps> = ({
   };
 
   const handleDeleteNote = async (noteId: string) => {
-    if (!confirm('Are you sure you want to delete this note?')) return;
+    if (!user || !confirm('Are you sure you want to delete this note?')) return;
     try {
-      await api.deleteNote(noteId);
+      await deleteFirebaseUserNote(user.id, noteId);
       const remaining = notes.filter((n) => n.id !== noteId);
       setNotes(remaining);
       if (selectedNote?.id === noteId) {
@@ -263,9 +298,10 @@ export const NotesView: React.FC<NotesViewProps> = ({
   };
 
   const togglePin = async (note: Note) => {
+    if (!user) return;
     const next = !note.isPinned;
     try {
-      await api.updateNote(note.id, { isPinned: next });
+      await updateFirebaseUserNote(user.id, note.id, { isPinned: next });
       setNotes((prev) => prev.map((n) => (n.id === note.id ? { ...n, isPinned: next } : n)));
       if (selectedNote?.id === note.id) {
         setSelectedNote((prev) => (prev ? { ...prev, isPinned: next } : null));
@@ -277,9 +313,10 @@ export const NotesView: React.FC<NotesViewProps> = ({
   };
 
   const toggleFavorite = async (note: Note) => {
+    if (!user) return;
     const next = !note.isFavorite;
     try {
-      await api.updateNote(note.id, { isFavorite: next });
+      await updateFirebaseUserNote(user.id, note.id, { isFavorite: next });
       setNotes((prev) => prev.map((n) => (n.id === note.id ? { ...n, isFavorite: next } : n)));
       if (selectedNote?.id === note.id) {
         setSelectedNote((prev) => (prev ? { ...prev, isFavorite: next } : null));
@@ -290,9 +327,10 @@ export const NotesView: React.FC<NotesViewProps> = ({
   };
 
   const toggleArchive = async (note: Note) => {
+    if (!user) return;
     const next = !note.isArchived;
     try {
-      await api.updateNote(note.id, { isArchived: next });
+      await updateFirebaseUserNote(user.id, note.id, { isArchived: next });
       setNotes((prev) => prev.map((n) => (n.id === note.id ? { ...n, isArchived: next } : n)));
       if (selectedNote?.id === note.id) {
         setSelectedNote((prev) => (prev ? { ...prev, isArchived: next } : null));
@@ -303,8 +341,9 @@ export const NotesView: React.FC<NotesViewProps> = ({
     }
   };
 
-  // AI Generate Notes Action
+  // AI Generate Notes Action: Store under users/{uid}/aiNotes and users/{uid}/notes
   const handleAIGenerateNotes = async () => {
+    if (!user) return;
     if (!aiTopic.trim() && !aiSourceText.trim()) {
       error('Please provide a topic or paste lecture material');
       return;
@@ -318,27 +357,72 @@ export const NotesView: React.FC<NotesViewProps> = ({
         subjectId: aiSubjectId || subjects[0]?.id,
       });
 
-      // Save generated note directly into database
-      const createdRes = await api.createNote({
+      // 1. Save to users/{uid}/aiNotes/{noteId}
+      const savedAINote = await saveFirebaseUserAINote(user.id, {
+        title: res.note.title,
+        content: res.note.content,
+        topic: aiTopic.trim(),
+        sourceText: aiSourceText.trim(),
+        mode: aiMode,
+        subjectId: aiSubjectId || subjects[0]?.id || '',
+        tags: res.note.tags || ['AI Generated'],
+      });
+      setAiNotes((prev) => [savedAINote, ...prev]);
+
+      // 2. Also save to personal notes collection for interactive editor & review
+      const createdNote = await saveFirebaseUserNote(user.id, {
         title: res.note.title,
         content: res.note.content,
         subjectId: aiSubjectId || subjects[0]?.id || '',
-        tags: res.note.tags,
+        tags: res.note.tags || ['AI Generated'],
         color: '#8B5CF6',
         isPinned: false,
         isFavorite: false,
+        isArchived: false,
       });
 
-      setNotes((prev) => [createdRes.note, ...prev]);
-      selectNote(createdRes.note);
+      setNotes((prev) => [createdNote, ...prev]);
+      selectNote(createdNote);
       setIsAIModalOpen(false);
       setAiTopic('');
       setAiSourceText('');
-      success('AI Study Notes generated & saved to your space!');
+      success('AI Study Notes generated & saved to your private Firebase space!');
     } catch (err: any) {
       error(err.message || 'AI generation failed');
     } finally {
       setAiLoading(false);
+    }
+  };
+
+  const handleLoadSampleNote = async () => {
+    if (!user) return;
+    try {
+      const demoSub = subjects[0]?.id || '';
+      const sample = await saveFirebaseUserNote(user.id, {
+        title: '[DEMO SAMPLE] Data Structures & Algorithm Complexity',
+        content: `<h1>[PUBLIC DEMO CONTENT] Algorithmic Complexity Cheatsheet</h1>
+<p><em>Note: This is starter reference material clearly marked as sample demo content.</em></p>
+<h2>Big-O Notation Hierarchy</h2>
+<ul>
+  <li><strong>O(1)</strong> - Constant Time (Hash map lookup)</li>
+  <li><strong>O(log N)</strong> - Logarithmic Time (Binary Search)</li>
+  <li><strong>O(N)</strong> - Linear Time (Single array loop)</li>
+  <li><strong>O(N log N)</strong> - Linearithmic Time (Merge Sort, Quick Sort)</li>
+  <li><strong>O(N²)</strong> - Quadratic Time (Nested loops)</li>
+</ul>
+<p>You can edit or delete this demo sample anytime.</p>`,
+        subjectId: demoSub,
+        tags: ['Demo Content', 'Sample', 'Computer Science'],
+        color: '#3B82F6',
+        isPinned: false,
+        isFavorite: false,
+        isArchived: false,
+      });
+      setNotes((prev) => [sample, ...prev]);
+      selectNote(sample);
+      success('Sample demo note loaded into your space!');
+    } catch {
+      error('Failed to load sample note');
     }
   };
 
@@ -350,6 +434,10 @@ export const NotesView: React.FC<NotesViewProps> = ({
       if (n.isArchived) return false;
       if (activeTab === 'favorites' && !n.isFavorite) return false;
       if (activeTab === 'pinned' && !n.isPinned) return false;
+      if (activeTab === 'aiNotes') {
+        const isAI = n.tags?.some((t) => t.toLowerCase().includes('ai')) || n.title.toLowerCase().includes('ai');
+        if (!isAI) return false;
+      }
     }
 
     if (selectedSubjectId && n.subjectId !== selectedSubjectId) return false;
@@ -400,6 +488,7 @@ export const NotesView: React.FC<NotesViewProps> = ({
             <div className="mt-2 space-y-0.5">
               {[
                 { id: 'all', label: 'All Notes', icon: BookOpen, count: notes.filter((n) => !n.isArchived).length },
+                { id: 'aiNotes', label: 'AI Notes', icon: Bot, count: notes.filter((n) => (n.tags?.some((t) => t.toLowerCase().includes('ai')) || n.title.toLowerCase().includes('ai')) && !n.isArchived).length },
                 { id: 'favorites', label: 'Favorites', icon: Star, count: notes.filter((n) => n.isFavorite && !n.isArchived).length },
                 { id: 'pinned', label: 'Pinned', icon: Pin, count: notes.filter((n) => n.isPinned && !n.isArchived).length },
                 { id: 'archived', label: 'Archived', icon: Archive, count: notes.filter((n) => n.isArchived).length },
@@ -534,15 +623,35 @@ export const NotesView: React.FC<NotesViewProps> = ({
         {/* Note Cards List */}
         <div className="flex-1 overflow-y-auto divide-y divide-zinc-100 dark:divide-zinc-800/60 p-2 space-y-1">
           {filteredNotes.length === 0 ? (
-            <div className="p-8 text-center text-zinc-400 space-y-2">
-              <BookOpen className="w-8 h-8 mx-auto text-zinc-300 dark:text-zinc-700" />
-              <p className="text-xs font-medium">No notes match your selection.</p>
-              <button
-                onClick={handleCreateNewNote}
-                className="text-xs text-indigo-500 font-semibold hover:underline"
-              >
-                + Create new note
-              </button>
+            <div className="p-6 text-center text-zinc-400 space-y-3">
+              <BookOpen className="w-9 h-9 mx-auto text-zinc-300 dark:text-zinc-700" />
+              <div>
+                <p className="text-xs font-bold text-zinc-700 dark:text-zinc-300">
+                  {notes.length === 0 ? 'Your private workspace is empty' : 'No notes match your selection'}
+                </p>
+                <p className="text-[11px] text-zinc-500 mt-0.5">
+                  {notes.length === 0
+                    ? 'Notes created here are isolated to your unique account.'
+                    : 'Try changing your search or folder filter.'}
+                </p>
+              </div>
+
+              <div className="pt-2 flex flex-col gap-2">
+                <button
+                  onClick={handleCreateNewNote}
+                  className="w-full py-2 px-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-xs"
+                >
+                  + Create Personal Note
+                </button>
+                {notes.length === 0 && (
+                  <button
+                    onClick={handleLoadSampleNote}
+                    className="w-full py-1.5 px-3 rounded-xl bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-600 dark:text-zinc-400 text-[11px] font-medium transition-colors"
+                  >
+                    💡 Load Starter Sample (Demo)
+                  </button>
+                )}
+              </div>
             </div>
           ) : (
             filteredNotes.map((note) => {

@@ -8,16 +8,12 @@ import {
   Bell,
   Sun,
   Moon,
-  Lock,
-  Trash2,
   Check,
   AlertCircle,
   Shield,
-  X,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
-import { api } from '../../lib/api';
 import { useToast } from '../../context/ToastContext';
 
 const PRESET_AVATARS = [
@@ -30,9 +26,9 @@ const PRESET_AVATARS = [
 ];
 
 export const ProfileView: React.FC = () => {
-  const { user, updateUser, logout } = useAuth();
+  const { user, updateUser } = useAuth();
   const { theme, setTheme } = useTheme();
-  const { success, error, info } = useToast();
+  const { success, error } = useToast();
 
   const [name, setName] = useState(user?.name || '');
   const [educationLevel, setEducationLevel] = useState(user?.educationLevel || 'Undergraduate');
@@ -54,13 +50,6 @@ export const ProfileView: React.FC = () => {
   );
 
   const [saving, setSaving] = useState(false);
-
-  // Change Password Modal
-  const [isPasswordModalOpen, setIsPasswordModalOpen] = useState(false);
-  const [currentPassword, setCurrentPassword] = useState('');
-  const [newPassword, setNewPassword] = useState('');
-  const [confirmNewPassword, setConfirmNewPassword] = useState('');
-  const [passwordLoading, setPasswordLoading] = useState(false);
 
   const handleSaveProfile = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -91,46 +80,22 @@ export const ProfileView: React.FC = () => {
     }
   };
 
-  const handleChangePassword = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (newPassword.length < 6) {
-      error('New password must be at least 6 characters');
-      return;
-    }
-    if (newPassword !== confirmNewPassword) {
-      error('New passwords do not match');
-      return;
-    }
-
-    setPasswordLoading(true);
+  const handleExportData = async () => {
     try {
-      await api.changePassword({ currentPassword, newPassword });
-      success('Password changed successfully');
-      setIsPasswordModalOpen(false);
-      setCurrentPassword('');
-      setNewPassword('');
-      setConfirmNewPassword('');
-    } catch (err: any) {
-      error(err.message || 'Failed to change password');
-    } finally {
-      setPasswordLoading(false);
-    }
-  };
-
-  const handleDeleteAccount = async () => {
-    if (
-      !confirm(
-        'WARNING: Are you sure you want to permanently delete your StudySync account? All your personal notes, flashcards, quizzes, and focus records will be wiped.'
-      )
-    ) {
-      return;
-    }
-
-    try {
-      await api.deleteAccount();
-      await logout();
-    } catch (err: any) {
-      error(err.message || 'Failed to delete account');
+      const data = {
+        user,
+        exportedAt: new Date().toISOString(),
+      };
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `studysync-backup-${new Date().toISOString().split('T')[0]}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      success('StudySync data exported successfully!');
+    } catch {
+      error('Failed to export data');
     }
   };
 
@@ -366,104 +331,27 @@ export const ProfileView: React.FC = () => {
         </div>
       </form>
 
-      {/* Account Security & Danger Zone */}
+      {/* Workspace Data Management */}
       <div className="p-6 rounded-3xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800/80 shadow-xs space-y-4">
         <h3 className="text-base font-bold text-zinc-900 dark:text-white flex items-center gap-2">
           <Shield className="w-5 h-5 text-indigo-500" />
-          <span>Security & Account Actions</span>
+          <span>Workspace Data Management</span>
         </h3>
 
         <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pt-2">
           <div>
-            <span className="text-sm font-semibold text-zinc-900 dark:text-white">Account Password</span>
-            <p className="text-xs text-zinc-500">Regularly update your password to keep your study notes secure.</p>
+            <span className="text-sm font-semibold text-zinc-900 dark:text-white">Export Study Data</span>
+            <p className="text-xs text-zinc-500">Download a full JSON backup of your personal study space, goals, and records.</p>
           </div>
           <button
-            onClick={() => setIsPasswordModalOpen(true)}
+            type="button"
+            onClick={handleExportData}
             className="px-4 py-2 rounded-xl bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-800 dark:text-zinc-200 text-xs font-semibold border border-zinc-200 dark:border-zinc-700 transition-colors"
           >
-            Change Password
-          </button>
-        </div>
-
-        <div className="border-t border-zinc-100 dark:border-zinc-800 pt-4 flex flex-col sm:flex-row items-center justify-between gap-4">
-          <div>
-            <span className="text-sm font-semibold text-rose-500">Danger Zone</span>
-            <p className="text-xs text-zinc-500">Permanently delete your account and all associated study data.</p>
-          </div>
-          <button
-            onClick={handleDeleteAccount}
-            className="px-4 py-2 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 text-xs font-semibold border border-rose-500/20 transition-colors"
-          >
-            Delete Account
+            Export Backup (.json)
           </button>
         </div>
       </div>
-
-      {/* Change Password Modal */}
-      {isPasswordModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-in fade-in duration-150">
-          <div className="w-full max-w-md bg-zinc-900 border border-zinc-700/80 rounded-3xl shadow-2xl p-6 relative">
-            <button
-              onClick={() => setIsPasswordModalOpen(false)}
-              className="absolute top-4 right-4 p-1.5 text-zinc-400 hover:text-white rounded-lg hover:bg-zinc-800"
-            >
-              <X className="w-5 h-5" />
-            </button>
-
-            <h3 className="text-lg font-bold text-white mb-4">Change Password</h3>
-
-            <form onSubmit={handleChangePassword} className="space-y-4">
-              <div>
-                <label className="block text-xs font-semibold text-zinc-300 mb-1">
-                  Current Password
-                </label>
-                <input
-                  type="password"
-                  value={currentPassword}
-                  onChange={(e) => setCurrentPassword(e.target.value)}
-                  required
-                  className="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-xl text-white text-xs focus:outline-none focus:border-indigo-500"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-zinc-300 mb-1">
-                  New Password (min 6 chars)
-                </label>
-                <input
-                  type="password"
-                  value={newPassword}
-                  onChange={(e) => setNewPassword(e.target.value)}
-                  required
-                  className="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-xl text-white text-xs focus:outline-none focus:border-indigo-500"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-zinc-300 mb-1">
-                  Confirm New Password
-                </label>
-                <input
-                  type="password"
-                  value={confirmNewPassword}
-                  onChange={(e) => setConfirmNewPassword(e.target.value)}
-                  required
-                  className="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-xl text-white text-xs focus:outline-none focus:border-indigo-500"
-                />
-              </div>
-
-              <button
-                type="submit"
-                disabled={passwordLoading}
-                className="w-full mt-2 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs shadow-md transition-colors disabled:opacity-50"
-              >
-                {passwordLoading ? 'Updating...' : 'Update Password'}
-              </button>
-            </form>
-          </div>
-        </div>
-      )}
     </div>
   );
 };
