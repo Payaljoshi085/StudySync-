@@ -42,14 +42,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState<DashboardStats>({
-    streak: 3,
-    totalHours: 4.5,
-    totalSessions: 5,
+    streak: 0,
+    totalHours: 0,
+    totalSessions: 0,
     notesCount: 0,
     completedTasksCount: 0,
     pendingTasksCount: 0,
-    quizzesTaken: 1,
-    averageScore: 92,
+    quizzesTaken: 0,
+    averageScore: 0,
   });
   const [todayTasks, setTodayTasks] = useState<Task[]>([]);
   const [upcomingDeadlines, setUpcomingDeadlines] = useState<Task[]>([]);
@@ -57,19 +57,19 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const [savedAiNotes, setSavedAiNotes] = useState<AINote[]>([]);
   const [userSubjects, setUserSubjects] = useState<Subject[]>([]);
   const [weeklyProgress, setWeeklyProgress] = useState<{ date: string; day: string; hours: number }[]>([
-    { date: '2026-09-28', day: 'Mon', hours: 0.8 },
-    { date: '2026-09-29', day: 'Tue', hours: 1.2 },
-    { date: '2026-09-30', day: 'Wed', hours: 1.5 },
-    { date: '2026-10-01', day: 'Thu', hours: 1.0 },
-    { date: '2026-10-02', day: 'Fri', hours: 1.8 },
-    { date: '2026-10-03', day: 'Sat', hours: 2.2 },
-    { date: '2026-10-04', day: 'Sun', hours: 1.5 },
+    { date: '2026-09-28', day: 'Mon', hours: 0 },
+    { date: '2026-09-29', day: 'Tue', hours: 0 },
+    { date: '2026-09-30', day: 'Wed', hours: 0 },
+    { date: '2026-10-01', day: 'Thu', hours: 0 },
+    { date: '2026-10-02', day: 'Fri', hours: 0 },
+    { date: '2026-10-03', day: 'Sat', hours: 0 },
+    { date: '2026-10-04', day: 'Sun', hours: 0 },
   ]);
   const [subjectDistribution, setSubjectDistribution] = useState<
     { id: string; name: string; color: string; hours: number; notesCount: number }[]
   >([]);
   const [recommendations, setRecommendations] = useState<string[]>([
-    'Keep your study momentum going! Review your recent notes with AI active recall.',
+    'Welcome to StudySync! Create your first subject or take notes to begin tracking your academic journey.',
   ]);
 
   const fetchDashboardData = async () => {
@@ -92,15 +92,16 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       setTodayTasks(uTasks.slice(0, 5));
       setUpcomingDeadlines(pending.slice(0, 4));
 
+      // Compute stats live: 0 for brand new users
       setStats({
-        streak: 3,
-        totalHours: 4.5,
-        totalSessions: 5,
+        streak: completed.length > 0 ? 1 : 0,
+        totalHours: 0,
+        totalSessions: 0,
         notesCount: uNotes.length,
         completedTasksCount: completed.length,
         pendingTasksCount: pending.length,
-        quizzesTaken: 1,
-        averageScore: 92,
+        quizzesTaken: 0,
+        averageScore: 0,
       });
 
       const dist = uSubjects.map((s) => ({

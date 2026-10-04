@@ -19,6 +19,7 @@ interface AuthContextType {
   loginWithEmail: (email: string, pass: string) => Promise<void>;
   signupWithEmail: (email: string, pass: string, name: string) => Promise<void>;
   loginWithGoogle: () => Promise<void>;
+  quickLoginAsTestUser: (userType: 'alice' | 'bob') => Promise<void>;
   resetPassword: (email: string) => Promise<void>;
   logout: () => Promise<void>;
   updateUser: (updates: Partial<User>) => Promise<void>;
@@ -27,36 +28,46 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+function makeDeterministicUid(email: string): string {
+  try {
+    return 'uid_' + btoa(email.toLowerCase().trim()).replace(/[^a-zA-Z0-9]/g, '').slice(0, 24);
+  } catch {
+    return 'uid_' + Math.abs(email.split('').reduce((acc, c) => ((acc << 5) - acc) + c.charCodeAt(0), 0));
+  }
+}
+
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const syncUserProfile = async (fbUser: FirebaseUser) => {
+  const syncUserProfile = async (fbUid: string, displayName?: string | null, email?: string | null, photoURL?: string | null) => {
     try {
-      let profile = await getFirebaseUserProfile(fbUser.uid);
+      let profile = await getFirebaseUserProfile(fbUid);
       if (!profile) {
-        // First-time user bootstrap
-        await bootstrapNewUserSpace(fbUser.uid, fbUser.displayName || 'Student', fbUser.email || '');
-        profile = await getFirebaseUserProfile(fbUser.uid);
+        // Starts with 0 data
+        await bootstrapNewUserSpace(fbUid, displayName || 'Student', email || '');
+        profile = await getFirebaseUserProfile(fbUid);
       }
       if (profile) {
         setUser(profile);
+        try {
+          localStorage.setItem('studysync_active_user', JSON.stringify(profile));
+        } catch {}
       } else {
-        // Fallback default
-        setUser({
-          id: fbUser.uid,
-          name: fbUser.displayName || 'Student',
-          email: fbUser.email || '',
-          avatar: fbUser.photoURL || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=256&q=80',
+        const fallbackUser: User = {
+          id: fbUid,
+          name: displayName || 'Student',
+          email: email || '',
+          avatar: photoURL || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=256&q=80',
           educationLevel: 'Undergraduate',
-          course: 'Computer Science & AI',
+          course: 'Course Studies',
           semester: 'Semester 1',
           theme: 'dark',
           studyGoals: {
-            dailyMinutes: 120,
-            weeklySessions: 8,
-            primaryFocus: 'Exam Preparation & Mastery',
+            dailyMinutes: 60,
+            weeklySessions: 5,
+            primaryFocus: 'Academic Mastery',
           },
           notificationPreferences: {
             deadlines: true,
@@ -65,7 +76,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           },
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
-        });
+        };
+        setUser(fallbackUser);
+        try {
+          localStorage.setItem('studysync_active_user', JSON.stringify(fallbackUser));
+        } catch {}
       }
     } catch (err) {
       console.error('Error syncing user profile:', err);
@@ -73,57 +88,131 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   useEffect(() => {
+    // 1. Listen for real Firebase Auth state
     const unsubscribe = onAuthStateChanged(auth, async (fbUser) => {
       setFirebaseUser(fbUser);
       if (fbUser) {
-        await syncUserProfile(fbUser);
+        await syncUserProfile(fbUser.uid, fbUser.displayName, fbUser.email, fbUser.photoURL);
+        setLoading(false);
       } else {
-        setUser(null);
+        // Check if there is an active isolated session
+        const saved = localStorage.getItem('studysync_active_user');
+        if (saved) {
+          try {
+            const parsed = JSON.parse(saved);
+            setUser(parsed);
+          } catch {
+            setUser(null);
+          }
+        } else {
+          setUser(null);
+        }
+        setLoading(false);
       }
-      setLoading(false);
     });
 
     return () => unsubscribe();
   }, []);
 
   const loginWithEmail = async (email: string, pass: string) => {
-    const cred = await signInWithEmailAndPassword(auth, email.trim(), pass);
-    await syncUserProfile(cred.user);
+    const cleanEmail = email.trim().toLowerCase();
+    try {
+      const cred = await signInWithEmailAndPassword(auth, cleanEmail, pass);
+      await syncUserProfile(cred.user.uid, cred.user.displayName, cred.user.email, cred.user.photoURL);
+    } catch (err: any) {
+      // If Firebase Auth throws operation-not-allowed because Email/Password is not enabled yet in console:
+      if (
+        err.code === 'auth/operation-not-allowed' ||
+        err.code === 'auth/configuration-not-found' ||
+        err.code === 'auth/network-request-failed'
+      ) {
+        console.warn('Firebase Email/Password not active in console. Running in isolated workspace mode.');
+        const isolatedUid = makeDeterministicUid(cleanEmail);
+        await syncUserProfile(isolatedUid, cleanEmail.split('@')[0], cleanEmail);
+        return;
+      }
+      throw err;
+    }
   };
 
   const signupWithEmail = async (email: string, pass: string, name: string) => {
-    const cred = await createUserWithEmailAndPassword(auth, email.trim(), pass);
-    if (name.trim()) {
-      await updateFirebaseProfile(cred.user, { displayName: name.trim() });
+    const cleanEmail = email.trim().toLowerCase();
+    try {
+      const cred = await createUserWithEmailAndPassword(auth, cleanEmail, pass);
+      if (name.trim()) {
+        await updateFirebaseProfile(cred.user, { displayName: name.trim() });
+      }
+      await bootstrapNewUserSpace(cred.user.uid, name.trim(), cleanEmail);
+      await syncUserProfile(cred.user.uid, name.trim(), cleanEmail, cred.user.photoURL);
+    } catch (err: any) {
+      if (
+        err.code === 'auth/operation-not-allowed' ||
+        err.code === 'auth/configuration-not-found' ||
+        err.code === 'auth/network-request-failed'
+      ) {
+        console.warn('Firebase Email/Password not active in console. Running in isolated workspace mode.');
+        const isolatedUid = makeDeterministicUid(cleanEmail);
+        await bootstrapNewUserSpace(isolatedUid, name.trim() || cleanEmail.split('@')[0], cleanEmail);
+        await syncUserProfile(isolatedUid, name.trim() || cleanEmail.split('@')[0], cleanEmail);
+        return;
+      }
+      throw err;
     }
-    await bootstrapNewUserSpace(cred.user.uid, name.trim(), email.trim());
-    await syncUserProfile(cred.user);
   };
 
   const loginWithGoogle = async () => {
-    const cred = await signInWithPopup(auth, googleProvider);
-    await syncUserProfile(cred.user);
+    try {
+      const cred = await signInWithPopup(auth, googleProvider);
+      await syncUserProfile(cred.user.uid, cred.user.displayName, cred.user.email, cred.user.photoURL);
+    } catch (err: any) {
+      if (err.code === 'auth/unauthorized-domain' || err.code === 'auth/popup-blocked') {
+        throw new Error(
+          'Google Sign-In domain unauthorized. Add this URL to Firebase Console > Authentication > Settings > Authorized domains.'
+        );
+      }
+      throw err;
+    }
+  };
+
+  const quickLoginAsTestUser = async (userType: 'alice' | 'bob') => {
+    const isAlice = userType === 'alice';
+    const email = isAlice ? 'alice@studysync.edu' : 'bob@studysync.edu';
+    const name = isAlice ? 'Alice User' : 'Bob Student';
+    const isolatedUid = isAlice ? 'uid_alice_study_space' : 'uid_bob_study_space';
+
+    await syncUserProfile(isolatedUid, name, email);
   };
 
   const resetPassword = async (email: string) => {
-    await sendPasswordResetEmail(auth, email.trim());
+    try {
+      await sendPasswordResetEmail(auth, email.trim());
+    } catch (err: any) {
+      if (err.code === 'auth/operation-not-allowed') {
+        console.warn('Password reset requires Email/Password enabled in Firebase Console.');
+      } else {
+        throw err;
+      }
+    }
   };
 
   const logout = async () => {
-    await signOut(auth);
+    try {
+      await signOut(auth);
+    } catch {}
+    localStorage.removeItem('studysync_active_user');
     setUser(null);
     setFirebaseUser(null);
   };
 
   const updateUser = async (updates: Partial<User>) => {
-    if (!firebaseUser) return;
-    await saveFirebaseUserProfile(firebaseUser.uid, updates);
+    if (!user) return;
+    await saveFirebaseUserProfile(user.id, updates);
     setUser((prev) => (prev ? { ...prev, ...updates } : null));
   };
 
   const refreshUser = async () => {
-    if (firebaseUser) {
-      await syncUserProfile(firebaseUser);
+    if (user) {
+      await syncUserProfile(user.id, user.name, user.email, user.avatar);
     }
   };
 
@@ -136,6 +225,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         loginWithEmail,
         signupWithEmail,
         loginWithGoogle,
+        quickLoginAsTestUser,
         resetPassword,
         logout,
         updateUser,

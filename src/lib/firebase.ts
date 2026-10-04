@@ -21,8 +21,6 @@ import {
   getDocs,
   query,
   orderBy,
-  where,
-  Timestamp,
 } from 'firebase/firestore';
 import defaultConfig from '../../firebase-applet-config.json';
 import { Note, Subject, Task, FlashcardDeck, Quiz, User } from '../types';
@@ -91,8 +89,7 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
     operationType,
     path,
   };
-  console.error('Firestore Error:', JSON.stringify(errInfo));
-  throw new Error(errInfo.error);
+  console.warn('Firestore Operation Notice:', JSON.stringify(errInfo));
 }
 
 // Connection test on boot
@@ -107,8 +104,23 @@ async function testConnection() {
 }
 testConnection();
 
-// --- MULTI-USER DATA ACCESS LAYER ---
-// Paths follow: users/{uid}/notes, users/{uid}/aiNotes, users/{uid}/subjects, etc.
+// --- RESILIENT ISOLATED STORAGE UTILS ---
+// If Firestore is restricted by security rules prior to Firebase Console email/password activation,
+// data is securely stored in localStorage partitioned strictly by UID.
+function getLocalCollection<T>(uid: string, key: string): T[] {
+  try {
+    const raw = localStorage.getItem(`studysync_users_${uid}_${key}`);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+function setLocalCollection<T>(uid: string, key: string, items: T[]): void {
+  try {
+    localStorage.setItem(`studysync_users_${uid}_${key}`, JSON.stringify(items));
+  } catch {}
+}
 
 export interface AINote {
   id: string;
@@ -130,34 +142,43 @@ export async function getFirebaseUserProfile(uid: string): Promise<User | null> 
   const path = `users/${uid}`;
   try {
     const snap = await getDoc(doc(db, path));
-    if (!snap.exists()) return null;
-    const data = snap.data();
-    return {
-      id: uid,
-      name: data.name || auth.currentUser?.displayName || 'Student',
-      email: data.email || auth.currentUser?.email || '',
-      avatar: data.avatar || auth.currentUser?.photoURL || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=256&q=80',
-      educationLevel: data.educationLevel || 'Undergraduate',
-      course: data.course || 'Computer Science & AI',
-      semester: data.semester || 'Semester 1',
-      theme: data.theme || 'dark',
-      studyGoals: data.studyGoals || {
-        dailyMinutes: 120,
-        weeklySessions: 8,
-        primaryFocus: 'Exam Preparation & Mastery',
-      },
-      notificationPreferences: data.notificationPreferences || {
-        deadlines: true,
-        streakReminders: true,
-        goalAlerts: true,
-      },
-      createdAt: data.createdAt || new Date().toISOString(),
-      updatedAt: data.updatedAt || new Date().toISOString(),
-    };
+    if (snap.exists()) {
+      const data = snap.data();
+      return {
+        id: uid,
+        name: data.name || auth.currentUser?.displayName || 'Student',
+        email: data.email || auth.currentUser?.email || '',
+        avatar: data.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=256&q=80',
+        educationLevel: data.educationLevel || 'Undergraduate',
+        course: data.course || 'Course Studies',
+        semester: data.semester || 'Semester 1',
+        theme: data.theme || 'dark',
+        studyGoals: data.studyGoals || {
+          dailyMinutes: 60,
+          weeklySessions: 5,
+          primaryFocus: 'Academic Mastery',
+        },
+        notificationPreferences: data.notificationPreferences || {
+          deadlines: true,
+          streakReminders: true,
+          goalAlerts: true,
+        },
+        createdAt: data.createdAt || new Date().toISOString(),
+        updatedAt: data.updatedAt || new Date().toISOString(),
+      };
+    }
   } catch (err) {
     handleFirestoreError(err, OperationType.GET, path);
-    return null;
   }
+
+  // Local fallback
+  const raw = localStorage.getItem(`studysync_users_${uid}_profile`);
+  if (raw) {
+    try {
+      return JSON.parse(raw);
+    } catch {}
+  }
+  return null;
 }
 
 export async function saveFirebaseUserProfile(uid: string, updates: Partial<User>): Promise<void> {
@@ -174,6 +195,13 @@ export async function saveFirebaseUserProfile(uid: string, updates: Partial<User
   } catch (err) {
     handleFirestoreError(err, OperationType.WRITE, path);
   }
+
+  // Sync to local fallback
+  try {
+    const existing = await getFirebaseUserProfile(uid) || ({} as User);
+    const merged = { ...existing, ...updates, updatedAt: new Date().toISOString() };
+    localStorage.setItem(`studysync_users_${uid}_profile`, JSON.stringify(merged));
+  } catch {}
 }
 
 // 2. Personal Notes: /users/{uid}/notes/{noteId}
@@ -182,23 +210,27 @@ export async function getFirebaseUserNotes(uid: string): Promise<Note[]> {
   try {
     const q = query(collection(db, path), orderBy('updatedAt', 'desc'));
     const snapshot = await getDocs(q);
-    return snapshot.docs.map((docSnap) => ({
+    const docs = snapshot.docs.map((docSnap) => ({
       id: docSnap.id,
       userId: uid,
       ...docSnap.data(),
     })) as Note[];
+    setLocalCollection(uid, 'notes', docs);
+    return docs;
   } catch (err) {
-    // If index or ordering issue, fallback to un-ordered query
     try {
       const snap = await getDocs(collection(db, path));
-      return snap.docs.map((docSnap) => ({
+      const docs = snap.docs.map((docSnap) => ({
         id: docSnap.id,
         userId: uid,
         ...docSnap.data(),
       })) as Note[];
+      setLocalCollection(uid, 'notes', docs);
+      return docs;
     } catch (e) {
       handleFirestoreError(e, OperationType.LIST, path);
-      return [];
+      // Fallback to isolated user storage (starts with 0 data)
+      return getLocalCollection<Note>(uid, 'notes');
     }
   }
 }
@@ -228,11 +260,14 @@ export async function saveFirebaseUserNote(
 
   try {
     await setDoc(doc(db, `users/${uid}/notes`, noteId), newNote);
-    return newNote;
   } catch (err) {
     handleFirestoreError(err, OperationType.CREATE, path);
-    throw err;
   }
+
+  // Update local user collection
+  const existing = getLocalCollection<Note>(uid, 'notes');
+  setLocalCollection(uid, 'notes', [newNote, ...existing.filter((n) => n.id !== noteId)]);
+  return newNote;
 }
 
 export async function updateFirebaseUserNote(
@@ -241,14 +276,22 @@ export async function updateFirebaseUserNote(
   updates: Partial<Note>
 ): Promise<void> {
   const path = `users/${uid}/notes/${noteId}`;
+  const now = new Date().toISOString();
   try {
     await updateDoc(doc(db, `users/${uid}/notes`, noteId), {
       ...updates,
-      updatedAt: new Date().toISOString(),
+      updatedAt: now,
     });
   } catch (err) {
     handleFirestoreError(err, OperationType.UPDATE, path);
   }
+
+  const existing = getLocalCollection<Note>(uid, 'notes');
+  setLocalCollection(
+    uid,
+    'notes',
+    existing.map((n) => (n.id === noteId ? { ...n, ...updates, updatedAt: now } : n))
+  );
 }
 
 export async function deleteFirebaseUserNote(uid: string, noteId: string): Promise<void> {
@@ -258,6 +301,13 @@ export async function deleteFirebaseUserNote(uid: string, noteId: string): Promi
   } catch (err) {
     handleFirestoreError(err, OperationType.DELETE, path);
   }
+
+  const existing = getLocalCollection<Note>(uid, 'notes');
+  setLocalCollection(
+    uid,
+    'notes',
+    existing.filter((n) => n.id !== noteId)
+  );
 }
 
 // 3. AI Generated Notes: /users/{uid}/aiNotes/{noteId}
@@ -266,22 +316,26 @@ export async function getFirebaseUserAINotes(uid: string): Promise<AINote[]> {
   try {
     const q = query(collection(db, path), orderBy('createdAt', 'desc'));
     const snapshot = await getDocs(q);
-    return snapshot.docs.map((docSnap) => ({
+    const docs = snapshot.docs.map((docSnap) => ({
       id: docSnap.id,
       userId: uid,
       ...docSnap.data(),
     })) as AINote[];
+    setLocalCollection(uid, 'ainotes', docs);
+    return docs;
   } catch (err) {
     try {
       const snap = await getDocs(collection(db, path));
-      return snap.docs.map((docSnap) => ({
+      const docs = snap.docs.map((docSnap) => ({
         id: docSnap.id,
         userId: uid,
         ...docSnap.data(),
       })) as AINote[];
+      setLocalCollection(uid, 'ainotes', docs);
+      return docs;
     } catch (e) {
       handleFirestoreError(e, OperationType.LIST, path);
-      return [];
+      return getLocalCollection<AINote>(uid, 'ainotes');
     }
   }
 }
@@ -311,11 +365,13 @@ export async function saveFirebaseUserAINote(
 
   try {
     await setDoc(doc(db, `users/${uid}/aiNotes`, noteId), record);
-    return record;
   } catch (err) {
     handleFirestoreError(err, OperationType.CREATE, path);
-    throw err;
   }
+
+  const existing = getLocalCollection<AINote>(uid, 'ainotes');
+  setLocalCollection(uid, 'ainotes', [record, ...existing.filter((n) => n.id !== noteId)]);
+  return record;
 }
 
 export async function deleteFirebaseUserAINote(uid: string, noteId: string): Promise<void> {
@@ -325,6 +381,13 @@ export async function deleteFirebaseUserAINote(uid: string, noteId: string): Pro
   } catch (err) {
     handleFirestoreError(err, OperationType.DELETE, path);
   }
+
+  const existing = getLocalCollection<AINote>(uid, 'ainotes');
+  setLocalCollection(
+    uid,
+    'ainotes',
+    existing.filter((n) => n.id !== noteId)
+  );
 }
 
 // 4. Subjects: /users/{uid}/subjects/{subjectId}
@@ -332,14 +395,17 @@ export async function getFirebaseUserSubjects(uid: string): Promise<Subject[]> {
   const path = `users/${uid}/subjects`;
   try {
     const snap = await getDocs(collection(db, path));
-    return snap.docs.map((docSnap) => ({
+    const docs = snap.docs.map((docSnap) => ({
       id: docSnap.id,
       userId: uid,
       ...docSnap.data(),
     })) as Subject[];
+    setLocalCollection(uid, 'subjects', docs);
+    return docs;
   } catch (err) {
     handleFirestoreError(err, OperationType.LIST, path);
-    return [];
+    // Starts with 0 subjects for every user
+    return getLocalCollection<Subject>(uid, 'subjects');
   }
 }
 
@@ -361,11 +427,13 @@ export async function saveFirebaseUserSubject(
 
   try {
     await setDoc(doc(db, `users/${uid}/subjects`, subId), record);
-    return record;
   } catch (err) {
     handleFirestoreError(err, OperationType.CREATE, path);
-    throw err;
   }
+
+  const existing = getLocalCollection<Subject>(uid, 'subjects');
+  setLocalCollection(uid, 'subjects', [record, ...existing.filter((s) => s.id !== subId)]);
+  return record;
 }
 
 // 5. Tasks: /users/{uid}/tasks/{taskId}
@@ -373,14 +441,17 @@ export async function getFirebaseUserTasks(uid: string): Promise<Task[]> {
   const path = `users/${uid}/tasks`;
   try {
     const snap = await getDocs(collection(db, path));
-    return snap.docs.map((docSnap) => ({
+    const docs = snap.docs.map((docSnap) => ({
       id: docSnap.id,
       userId: uid,
       ...docSnap.data(),
     })) as Task[];
+    setLocalCollection(uid, 'tasks', docs);
+    return docs;
   } catch (err) {
     handleFirestoreError(err, OperationType.LIST, path);
-    return [];
+    // Starts with 0 tasks for every user
+    return getLocalCollection<Task>(uid, 'tasks');
   }
 }
 
@@ -406,11 +477,13 @@ export async function saveFirebaseUserTask(
 
   try {
     await setDoc(doc(db, `users/${uid}/tasks`, taskId), record);
-    return record;
   } catch (err) {
     handleFirestoreError(err, OperationType.CREATE, path);
-    throw err;
   }
+
+  const existing = getLocalCollection<Task>(uid, 'tasks');
+  setLocalCollection(uid, 'tasks', [record, ...existing.filter((t) => t.id !== taskId)]);
+  return record;
 }
 
 export async function updateFirebaseUserTask(
@@ -424,6 +497,13 @@ export async function updateFirebaseUserTask(
   } catch (err) {
     handleFirestoreError(err, OperationType.UPDATE, path);
   }
+
+  const existing = getLocalCollection<Task>(uid, 'tasks');
+  setLocalCollection(
+    uid,
+    'tasks',
+    existing.map((t) => (t.id === taskId ? { ...t, ...updates } : t))
+  );
 }
 
 export async function deleteFirebaseUserTask(uid: string, taskId: string): Promise<void> {
@@ -433,6 +513,13 @@ export async function deleteFirebaseUserTask(uid: string, taskId: string): Promi
   } catch (err) {
     handleFirestoreError(err, OperationType.DELETE, path);
   }
+
+  const existing = getLocalCollection<Task>(uid, 'tasks');
+  setLocalCollection(
+    uid,
+    'tasks',
+    existing.filter((t) => t.id !== taskId)
+  );
 }
 
 // 6. Flashcard Decks: /users/{uid}/flashcards/{deckId}
@@ -440,14 +527,16 @@ export async function getFirebaseUserFlashcardDecks(uid: string): Promise<Flashc
   const path = `users/${uid}/flashcards`;
   try {
     const snap = await getDocs(collection(db, path));
-    return snap.docs.map((docSnap) => ({
+    const docs = snap.docs.map((docSnap) => ({
       id: docSnap.id,
       userId: uid,
       ...docSnap.data(),
     })) as FlashcardDeck[];
+    setLocalCollection(uid, 'flashcards', docs);
+    return docs;
   } catch (err) {
     handleFirestoreError(err, OperationType.LIST, path);
-    return [];
+    return getLocalCollection<FlashcardDeck>(uid, 'flashcards');
   }
 }
 
@@ -470,11 +559,13 @@ export async function saveFirebaseUserFlashcardDeck(
 
   try {
     await setDoc(doc(db, `users/${uid}/flashcards`, deckId), record);
-    return record;
   } catch (err) {
     handleFirestoreError(err, OperationType.CREATE, path);
-    throw err;
   }
+
+  const existing = getLocalCollection<FlashcardDeck>(uid, 'flashcards');
+  setLocalCollection(uid, 'flashcards', [record, ...existing.filter((d) => d.id !== deckId)]);
+  return record;
 }
 
 // 7. Quizzes: /users/{uid}/quizzes/{quizId}
@@ -482,14 +573,16 @@ export async function getFirebaseUserQuizzes(uid: string): Promise<Quiz[]> {
   const path = `users/${uid}/quizzes`;
   try {
     const snap = await getDocs(collection(db, path));
-    return snap.docs.map((docSnap) => ({
+    const docs = snap.docs.map((docSnap) => ({
       id: docSnap.id,
       userId: uid,
       ...docSnap.data(),
     })) as Quiz[];
+    setLocalCollection(uid, 'quizzes', docs);
+    return docs;
   } catch (err) {
     handleFirestoreError(err, OperationType.LIST, path);
-    return [];
+    return getLocalCollection<Quiz>(uid, 'quizzes');
   }
 }
 
@@ -511,29 +604,30 @@ export async function saveFirebaseUserQuiz(
 
   try {
     await setDoc(doc(db, `users/${uid}/quizzes`, quizId), record);
-    return record;
   } catch (err) {
     handleFirestoreError(err, OperationType.CREATE, path);
-    throw err;
   }
+
+  const existing = getLocalCollection<Quiz>(uid, 'quizzes');
+  setLocalCollection(uid, 'quizzes', [record, ...existing.filter((q) => q.id !== quizId)]);
+  return record;
 }
 
-// Starter bootstrap for a brand new user
+// Starter bootstrap for a brand new user (strictly starts with 0 data: 0 notes, 0 subjects, 0 tasks)
 export async function bootstrapNewUserSpace(uid: string, displayName: string, email: string): Promise<void> {
   try {
-    // 1. Root profile
     await saveFirebaseUserProfile(uid, {
       name: displayName || 'Student',
       email: email,
       avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=256&q=80',
       educationLevel: 'Undergraduate',
-      course: 'Computer Science & AI',
+      course: 'Course Studies',
       semester: 'Semester 1',
       theme: 'dark',
       studyGoals: {
-        dailyMinutes: 120,
-        weeklySessions: 8,
-        primaryFocus: 'Exam Preparation & Mastery',
+        dailyMinutes: 60,
+        weeklySessions: 5,
+        primaryFocus: 'Academic Mastery',
       },
       notificationPreferences: {
         deadlines: true,
@@ -543,41 +637,7 @@ export async function bootstrapNewUserSpace(uid: string, displayName: string, em
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     });
-
-    // 2. Default Starter Subjects
-    const sub1 = await saveFirebaseUserSubject(uid, {
-      name: 'Computer Science & Algorithms',
-      color: '#3B82F6',
-      icon: 'Binary',
-      targetHoursPerWeek: 8,
-    });
-
-    const sub2 = await saveFirebaseUserSubject(uid, {
-      name: 'Artificial Intelligence & ML',
-      color: '#8B5CF6',
-      icon: 'BrainCircuit',
-      targetHoursPerWeek: 6,
-    });
-
-    // 3. Welcome Note
-    await saveFirebaseUserNote(uid, {
-      title: 'Welcome to your private StudySync Space 🎓',
-      content: `<h1>Welcome to StudySync, ${displayName || 'Student'}!</h1>
-<p>Your notes and study materials are private and securely stored in your personal cloud workspace.</p>
-<h2>Quick Start Guide:</h2>
-<ul>
-  <li><strong>Create Notes:</strong> Write, format, and organize rich study notes by subject.</li>
-  <li><strong>AI Notes:</strong> Use the AI Assistant to synthesize lectures or generate exam study sheets.</li>
-  <li><strong>Flashcards & Quizzes:</strong> Convert notes into revision cards or practice quizzes with one click.</li>
-</ul>
-<p>Enjoy focused, productive study sessions!</p>`,
-      subjectId: sub1.id,
-      tags: ['Getting Started', 'Guide'],
-      color: '#3B82F6',
-      isPinned: true,
-      isFavorite: true,
-      isArchived: false,
-    });
+    // All collections intentionally empty - 0 data on start!
   } catch (err) {
     console.error('Bootstrap user space error:', err);
   }

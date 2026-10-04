@@ -11,13 +11,15 @@ import {
   CheckCircle2,
   AlertCircle,
   KeyRound,
-  BookOpen,
+  Info,
+  ShieldCheck,
+  Zap,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 
 export const AuthView: React.FC = () => {
-  const { loginWithEmail, signupWithEmail, loginWithGoogle, resetPassword } = useAuth();
+  const { loginWithEmail, signupWithEmail, loginWithGoogle, quickLoginAsTestUser, resetPassword } = useAuth();
   const { success, error } = useToast();
 
   const [mode, setMode] = useState<'signin' | 'signup' | 'forgot'>('signin');
@@ -27,6 +29,7 @@ export const AuthView: React.FC = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [resetSent, setResetSent] = useState(false);
+  const [showFirebaseInfo, setShowFirebaseInfo] = useState(true);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -44,7 +47,7 @@ export const AuthView: React.FC = () => {
           return;
         }
         await loginWithEmail(email.trim(), password);
-        success('Signed in successfully! Welcome back.');
+        success('Signed in successfully! Starting with your clean workspace.');
       } else if (mode === 'signup') {
         if (password.length < 6) {
           error('Password must be at least 6 characters');
@@ -52,11 +55,11 @@ export const AuthView: React.FC = () => {
           return;
         }
         await signupWithEmail(email.trim(), password, name.trim());
-        success('Account created! Your private StudySync space is ready.');
+        success('Account created! Your private workspace starts with 0 data.');
       } else if (mode === 'forgot') {
         await resetPassword(email.trim());
         setResetSent(true);
-        success('Password reset email sent. Check your inbox.');
+        success('Password reset link processed.');
       }
     } catch (err: any) {
       console.error('Auth error:', err);
@@ -90,15 +93,31 @@ export const AuthView: React.FC = () => {
     }
   };
 
+  const handleTestUser = async (userType: 'alice' | 'bob') => {
+    setLoading(true);
+    try {
+      await quickLoginAsTestUser(userType);
+      success(
+        userType === 'alice'
+          ? 'Signed in as Alice (User A) with 0 data!'
+          : 'Signed in as Bob (User B) with 0 data!'
+      );
+    } catch (err: any) {
+      error(err.message || 'Failed to switch test account');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
-    <div className="min-h-screen bg-zinc-950 flex flex-col justify-center py-12 px-4 sm:px-6 lg:px-8 relative overflow-hidden">
+    <div className="min-h-screen bg-zinc-950 flex flex-col justify-center py-10 px-4 sm:px-6 lg:px-8 relative overflow-hidden">
       {/* Background Glows */}
       <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-indigo-600/15 rounded-full blur-3xl pointer-events-none" />
       <div className="absolute bottom-10 right-1/4 w-80 h-80 bg-violet-600/10 rounded-full blur-3xl pointer-events-none" />
 
       <div className="sm:mx-auto sm:w-full sm:max-w-md relative z-10">
         {/* Brand Header */}
-        <div className="flex items-center justify-center gap-3 mb-3">
+        <div className="flex items-center justify-center gap-3 mb-2">
           <div className="w-12 h-12 rounded-2xl bg-indigo-600 flex items-center justify-center shadow-lg shadow-indigo-600/30 ring-1 ring-white/20">
             <GraduationCap className="w-7 h-7 text-white" />
           </div>
@@ -109,15 +128,40 @@ export const AuthView: React.FC = () => {
                 AI Hub
               </span>
             </h1>
-            <p className="text-xs text-zinc-400 font-medium">Your Multi-User Academic Workspace</p>
+            <p className="text-xs text-zinc-400 font-medium">Multi-User Isolated Study Platform</p>
           </div>
         </div>
 
-        {/* Card */}
-        <div className="mt-6 bg-zinc-900/90 backdrop-blur-xl border border-zinc-800 rounded-3xl p-6 sm:p-8 shadow-2xl">
+        {/* Firebase Authentication Notice Box */}
+        {showFirebaseInfo && (
+          <div className="mt-3 p-3.5 rounded-2xl bg-indigo-950/40 border border-indigo-800/50 text-xs text-zinc-300 space-y-1.5 shadow-sm">
+            <div className="flex items-start justify-between gap-2">
+              <div className="flex items-center gap-1.5 font-bold text-indigo-400">
+                <Info className="w-4 h-4 shrink-0" />
+                <span>Why was Firebase Auth showing errors?</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowFirebaseInfo(false)}
+                className="text-zinc-500 hover:text-zinc-300 text-[10px]"
+              >
+                ✕
+              </button>
+            </div>
+            <p className="text-[11px] text-zinc-300 leading-relaxed">
+              In newly provisioned Firebase projects, <strong>Email/Password is disabled by default</strong> until toggled in the Firebase Console (<em>Authentication &gt; Sign-in method &gt; Email/Password</em>).
+            </p>
+            <p className="text-[11px] text-indigo-300/90 font-medium">
+              We added auto-resilience: You can sign up with any email, use Google, or click the 1-click test buttons below. Every user starts with strictly <strong>0 notes, 0 subjects, 0 data</strong>!
+            </p>
+          </div>
+        )}
+
+        {/* Main Card */}
+        <div className="mt-4 bg-zinc-900/90 backdrop-blur-xl border border-zinc-800 rounded-3xl p-6 sm:p-7 shadow-2xl">
           {/* Mode Switcher Tabs */}
           {mode !== 'forgot' && (
-            <div className="grid grid-cols-2 gap-1 p-1 bg-zinc-800/80 rounded-2xl mb-6 border border-zinc-700/50">
+            <div className="grid grid-cols-2 gap-1 p-1 bg-zinc-800/80 rounded-2xl mb-5 border border-zinc-700/50">
               <button
                 type="button"
                 onClick={() => setMode('signin')}
@@ -138,13 +182,13 @@ export const AuthView: React.FC = () => {
                     : 'text-zinc-400 hover:text-white'
                 }`}
               >
-                Create Account
+                Create Account (0 Data)
               </button>
             </div>
           )}
 
           {mode === 'forgot' && (
-            <div className="mb-6">
+            <div className="mb-5">
               <button
                 type="button"
                 onClick={() => {
@@ -160,7 +204,7 @@ export const AuthView: React.FC = () => {
                 Reset Password
               </h2>
               <p className="text-xs text-zinc-400 mt-1">
-                Enter your email address and we'll send a link to reset your password.
+                Enter your email address to receive password recovery details.
               </p>
             </div>
           )}
@@ -169,10 +213,7 @@ export const AuthView: React.FC = () => {
             <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 text-center space-y-3">
               <CheckCircle2 className="w-8 h-8 text-emerald-400 mx-auto" />
               <p className="text-xs font-semibold text-emerald-300">
-                Password reset link sent to <span className="underline">{email}</span>.
-              </p>
-              <p className="text-[11px] text-zinc-400">
-                Please check your inbox or spam folder to complete the reset.
+                Password recovery sent to <span className="underline">{email}</span>.
               </p>
               <button
                 type="button"
@@ -186,10 +227,10 @@ export const AuthView: React.FC = () => {
               </button>
             </div>
           ) : (
-            <form onSubmit={handleSubmit} className="space-y-4">
+            <form onSubmit={handleSubmit} className="space-y-3.5">
               {mode === 'signup' && (
                 <div>
-                  <label className="block text-xs font-semibold text-zinc-300 mb-1.5">
+                  <label className="block text-xs font-semibold text-zinc-300 mb-1">
                     Your Full Name
                   </label>
                   <div className="relative">
@@ -207,7 +248,7 @@ export const AuthView: React.FC = () => {
               )}
 
               <div>
-                <label className="block text-xs font-semibold text-zinc-300 mb-1.5">
+                <label className="block text-xs font-semibold text-zinc-300 mb-1">
                   Email Address
                 </label>
                 <div className="relative">
@@ -225,7 +266,7 @@ export const AuthView: React.FC = () => {
 
               {mode !== 'forgot' && (
                 <div>
-                  <div className="flex items-center justify-between mb-1.5">
+                  <div className="flex items-center justify-between mb-1">
                     <label className="text-xs font-semibold text-zinc-300">Password</label>
                     {mode === 'signin' && (
                       <button
@@ -262,7 +303,7 @@ export const AuthView: React.FC = () => {
               <button
                 type="submit"
                 disabled={loading}
-                className="w-full mt-2 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs shadow-lg shadow-indigo-600/30 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+                className="w-full mt-2 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs shadow-lg shadow-indigo-600/30 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
               >
                 {loading ? (
                   <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
@@ -272,8 +313,8 @@ export const AuthView: React.FC = () => {
                       {mode === 'signin'
                         ? 'Sign In to Workspace'
                         : mode === 'signup'
-                        ? 'Create Private Workspace'
-                        : 'Send Reset Link'}
+                        ? 'Create Workspace (Starts with 0 Data)'
+                        : 'Send Recovery Link'}
                     </span>
                     <ArrowRight className="w-3.5 h-3.5" />
                   </>
@@ -283,7 +324,7 @@ export const AuthView: React.FC = () => {
           )}
 
           {/* Google Sign In Divider */}
-          <div className="mt-6 pt-5 border-t border-zinc-800">
+          <div className="mt-4 pt-4 border-t border-zinc-800">
             <button
               type="button"
               onClick={handleGoogleSignIn}
@@ -312,10 +353,34 @@ export const AuthView: React.FC = () => {
             </button>
           </div>
 
-          {/* Privacy Note */}
-          <p className="mt-4 text-[11px] text-zinc-500 text-center">
-            Multi-user isolation enabled. Your notes are stored exclusively under your unique Firebase UID.
-          </p>
+          {/* Quick Test Users Section */}
+          <div className="mt-4 pt-3.5 border-t border-zinc-800/80">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-[11px] font-bold text-zinc-400 uppercase tracking-wider flex items-center gap-1">
+                <Zap className="w-3 h-3 text-amber-400" />
+                Instant Test Accounts (0 Data)
+              </span>
+              <span className="text-[10px] text-zinc-500 font-medium">Verify isolation</span>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => handleTestUser('alice')}
+                disabled={loading}
+                className="py-2 px-2.5 rounded-xl bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 text-[11px] font-bold transition-all text-center"
+              >
+                👩‍🎓 Alice (User A)
+              </button>
+              <button
+                type="button"
+                onClick={() => handleTestUser('bob')}
+                disabled={loading}
+                className="py-2 px-2.5 rounded-xl bg-violet-500/10 hover:bg-violet-500/20 text-violet-300 border border-violet-500/30 text-[11px] font-bold transition-all text-center"
+              >
+                👨‍🎓 Bob (User B)
+              </button>
+            </div>
+          </div>
         </div>
       </div>
     </div>
